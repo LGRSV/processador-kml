@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Processador KML</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --accent: #4f8ef7; --accent-dim: #1e2d4f;
+      --green: #3ecf8e; --green-dim: #0d2b1e;
+      --red: #f87171; --red-dim: #2b0e0e;
+      --text: #e2e8f0; --muted: #64748b;
+      --mono: 'JetBrains Mono', monospace;
+    }
+    body {
+      background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif;
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; padding: 48px 16px 80px;
+    }
+    header { text-align: center; margin-bottom: 48px; }
+    .logo { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .logo-icon {
+      width: 42px; height: 42px; background: var(--accent); border-radius: 10px;
+      display: flex; align-items: center; justify-content: center; font-size: 22px;
+    }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+    .subtitle { color: var(--muted); font-size: 15px; margin-top: 6px; }
+    .upload-zone {
+      width: 100%; max-width: 640px; border: 2px dashed var(--border);
+      border-radius: 16px; padding: 48px 32px; text-align: center;
+      cursor: pointer; transition: border-color .2s, background .2s;
+      position: relative; background: var(--surface);
+    }
+    .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: var(--accent-dim); }
+    .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .upload-icon { font-size: 40px; margin-bottom: 12px; }
+    .upload-zone h2 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+    .upload-zone p { color: var(--muted); font-size: 14px; }
+    .badge {
+      display: inline-block; margin-top: 14px; padding: 4px 12px;
+      background: var(--accent-dim); color: var(--accent);
+      border-radius: 999px; font-size: 12px; font-weight: 600; font-family: var(--mono);
+    }
+    #file-list { width: 100%; max-width: 640px; margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .file-pill {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 16px;
+      display: flex; align-items: center; gap: 10px; font-size: 14px;
+    }
+    .file-pill .fname { flex: 1; font-family: var(--mono); font-size: 13px; }
+    .file-pill .fsize { color: var(--muted); font-size: 12px; }
+    .file-pill .remove { cursor: pointer; color: var(--muted); font-size: 20px; background: none; border: none; padding: 0; line-height: 1; }
+    .file-pill .remove:hover { color: var(--red); }
+    #btn-processar {
+      margin-top: 24px; width: 100%; max-width: 640px; padding: 14px;
+      background: var(--accent); color: #fff; font-size: 15px; font-weight: 700;
+      border: none; border-radius: 12px; cursor: pointer;
+      transition: opacity .2s, transform .1s; display: none;
+    }
+    #btn-processar:hover { opacity: .88; }
+    #btn-processar:active { transform: scale(.98); }
+    #btn-processar:disabled { opacity: .5; cursor: not-allowed; }
+    .spinner {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,.3); border-top-color: #fff;
+      border-radius: 50%; animation: spin .7s linear infinite;
+      vertical-align: middle; margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #results { width: 100%; max-width: 640px; margin-top: 32px; display: flex; flex-direction: column; gap: 16px; }
+    .result-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .result-card.success { border-color: #1a3a28; }
+    .result-card.error   { border-color: #3a1a1a; }
+    .result-header { padding: 14px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+    .result-card.success .result-header { background: var(--green-dim); }
+    .result-card.error   .result-header { background: var(--red-dim); }
+    .result-icon { font-size: 18px; }
+    .result-name { flex: 1; font-family: var(--mono); font-size: 13px; font-weight: 600; }
+    .result-card.success .result-name { color: var(--green); }
+    .result-card.error   .result-name { color: var(--red); }
+    .result-body { padding: 18px; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .metric { background: var(--bg); border-radius: 10px; padding: 14px 12px; text-align: center; }
+    .metric-value { font-family: var(--mono); font-size: 22px; font-weight: 700; color: var(--accent); line-height: 1; }
+    .metric-label { font-size: 11px; color: var(--muted); margin-top: 6px; text-transform: uppercase; letter-spacing: .06em; }
+    .btn-download {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 11px; background: var(--green-dim); color: var(--green);
+      border: 1px solid #1a4a30; border-radius: 9px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: background .2s; font-family: 'Inter', sans-serif;
+    }
+    .btn-download:hover { background: #0d3a22; }
+    .error-msg { color: var(--red); font-size: 14px; font-family: var(--mono); }
+    #summary {
+      width: 100%; max-width: 640px; margin-top: 8px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 20px 24px; display: none;
+    }
+    #summary h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 16px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .summary-item { text-align: center; }
+    .summary-value { font-family: var(--mono); font-size: 26px; font-weight: 700; color: var(--text); }
+    .summary-label { font-size: 11px; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .06em; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <h1>Processador KML</h1>
+  </div>
+  <p class="subtitle">Corrija arquivos KML e obtenha extensão de rede, chaves e transformadores</p>
+</header>
+
+<div class="upload-zone" id="drop-zone">
+  <input type="file" id="file-input" multiple accept=".kml" />
+  <div class="upload-icon">📂</div>
+  <h2>Arraste os arquivos ou clique para selecionar</h2>
+  <p>Selecione um ou mais arquivos <strong>.kml brutos</strong></p>
+  <span class="badge">.kml</span>
+</div>
+
+<div id="file-list"></div>
+<button id="btn-processar">Processar arquivos</button>
+<div id="results"></div>
+
+<div id="summary">
+  <h3>Resumo Total</h3>
+  <div class="summary-grid">
+    <div class="summary-item">
+      <div class="summary-value" id="sum-cp">—</div>
+      <div class="summary-label">Extensão CP (km)</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-value" id="sum-ch">—</div>
+      <div class="summary-label">Chaves (CH)</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-value" id="sum-tr">—</div>
+      <div class="summary-label">Transformadores (TR)</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── KML Logic ────────────────────────────────────────────────────────────────
+const STYLE_MAP = { CH: "CHAVE", CP: "CABO", TR: "TRAFO" };
+const RENAME_FROM_DESC = new Set(["CH", "TR"]);
+const ORDEM_PASTAS = ["CHAVE", "CABO", "TRAFO"];
+
+function haversine(lon1, lat1, lon2, lat2) {
+  const R = 6371000;
+  const r = d => d * Math.PI / 180;
+  const phi1 = r(lat1), phi2 = r(lat2);
+  const dphi = r(lat2-lat1), dlam = r(lon2-lon1);
+  const a = Math.sin(dphi/2)**2 + Math.cos(phi1)*Math.cos(phi2)*Math.sin(dlam/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function processarKML(xmlString) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlString, "application/xml");
+  if (doc.querySelector("parsererror")) throw new Error("XML inválido.");
+
+  const docElem = doc.querySelector("Document");
+  if (!docElem) throw new Error("Arquivo sem elemento <Document>.");
+
+  // Separa styles
+  const styles = [...docElem.children].filter(c => c.tagName === "Style" || c.tagName === "StyleMap");
+
+  // Classifica placemarks
+  const bucket = {};
+  doc.querySelectorAll("Placemark").forEach(pm => {
+    const su = pm.querySelector("styleUrl");
+    if (!su) return;
+    const styleId = su.textContent.trim().replace("#", "").toUpperCase();
+    const destino = STYLE_MAP[styleId];
+    if (!destino) return;
+
+    // Corrige name para CH e TR
+    if (RENAME_FROM_DESC.has(styleId)) {
+      const desc = pm.querySelector("description");
+      if (desc) {
+        const primeiroCampo = desc.textContent.split("/")[0].trim();
+        const nameEl = pm.querySelector("name");
+        if (nameEl && primeiroCampo) nameEl.textContent = primeiroCampo;
+      }
+    }
+
+    if (!bucket[destino]) bucket[destino] = [];
+    bucket[destino].push(pm);
+  });
+
+  // Remove folders antigas do Document
+  [...docElem.children].forEach(c => {
+    if (c.tagName === "Folder" || c.tagName === "Placemark") c.remove();
+  });
+
+  // Recria com novas pastas
+  ORDEM_PASTAS.forEach(pasta => {
+    const items = bucket[pasta] || [];
+    if (!items.length) return;
+    const folder = doc.createElement("Folder");
+    const nameEl = doc.createElement("name");
+    nameEl.textContent = pasta;
+    folder.appendChild(nameEl);
+    items.forEach(pm => folder.appendChild(pm));
+    docElem.appendChild(folder);
+  });
+
+  // Calcula métricas
+  let extCp = 0;
+  (bucket["CABO"] || []).forEach(pm => {
+    const coords = pm.querySelector("coordinates");
+    if (!coords) return;
+    const pts = coords.textContent.trim().split(/\s+/).map(p => p.split(",").map(Number));
+    for (let i = 0; i < pts.length - 1; i++)
+      extCp += haversine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]);
+  });
+
+  const cntCh = (bucket["CHAVE"] || []).length;
+  const cntTr = (bucket["TRAFO"] || []).length;
+
+  const xmlOut = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    new XMLSerializer().serializeToString(doc.documentElement);
+
+  return { xmlOut, extCpKm: extCp / 1000, cntCh, cntTr };
+}
+
+// ─── UI ──────────────────────────────────────────────────────────────────────
+const dropZone  = document.getElementById("drop-zone");
+const fileInput = document.getElementById("file-input");
+const fileListEl = document.getElementById("file-list");
+const btn       = document.getElementById("btn-processar");
+const resultsEl = document.getElementById("results");
+const summaryEl = document.getElementById("summary");
+
+let selectedFiles = [];
+
+const formatSize = b => b < 1024 ? b+" B" : b < 1048576 ? (b/1024).toFixed(1)+" KB" : (b/1048576).toFixed(1)+" MB";
+
+function renderFileList() {
+  fileListEl.innerHTML = "";
+  selectedFiles.forEach((f, i) => {
+    const pill = document.createElement("div");
+    pill.className = "file-pill";
+    pill.innerHTML = `<span>📄</span><span class="fname">${f.name}</span><span class="fsize">${formatSize(f.size)}</span><button class="remove" data-i="${i}">×</button>`;
+    fileListEl.appendChild(pill);
+  });
+  btn.style.display = selectedFiles.length ? "block" : "none";
+}
+
+fileListEl.addEventListener("click", e => {
+  if (e.target.classList.contains("remove")) {
+    selectedFiles.splice(+e.target.dataset.i, 1);
+    renderFileList();
+  }
+});
+
+function addFiles(files) {
+  const novos = [...files].filter(f => f.name.endsWith(".kml") && !f.name.endsWith("_corrigido.kml"));
+  selectedFiles = [...selectedFiles, ...novos];
+  renderFileList();
+}
+
+fileInput.addEventListener("change", e => addFiles(e.target.files));
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drag"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag"));
+dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("drag"); addFiles(e.dataTransfer.files); });
+
+function downloadBlob(content, filename) {
+  const blob = new Blob([content], { type: "application/vnd.google-earth.kml+xml" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+btn.addEventListener("click", async () => {
+  if (!selectedFiles.length) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Processando...';
+  resultsEl.innerHTML = "";
+  summaryEl.style.display = "none";
+
+  let totalCp = 0, totalCh = 0, totalTr = 0, houveSuccesso = false;
+  const xmlResults = [];
+
+  for (const file of selectedFiles) {
+    const card = document.createElement("div");
+    card.className = "result-card";
+    resultsEl.appendChild(card);
+
+    try {
+      const xml = await file.text();
+      const { xmlOut, extCpKm, cntCh, cntTr } = processarKML(xml);
+      const nomeCorrigido = file.name.replace(".kml", "_corrigido.kml");
+
+      totalCp += extCpKm; totalCh += cntCh; totalTr += cntTr;
+      houveSuccesso = true;
+      xmlResults.push({ xmlOut, nomeCorrigido });
+
+      card.className = "result-card success";
+      const idx = xmlResults.length - 1;
+      card.innerHTML = `
+        <div class="result-header">
+          <span class="result-icon">✅</span>
+          <span class="result-name">${file.name}</span>
+        </div>
+        <div class="result-body">
+          <div class="metrics">
+            <div class="metric"><div class="metric-value">${extCpKm.toFixed(2)}</div><div class="metric-label">Extensão CP (km)</div></div>
+            <div class="metric"><div class="metric-value">${cntCh}</div><div class="metric-label">Chaves (CH)</div></div>
+            <div class="metric"><div class="metric-value">${cntTr}</div><div class="metric-label">Transformadores</div></div>
+          </div>
+          <button class="btn-download" data-idx="${idx}">⬇️ Baixar arquivo corrigido</button>
+        </div>`;
+    } catch(e) {
+      card.className = "result-card error";
+      card.innerHTML = `
+        <div class="result-header">
+          <span class="result-icon">❌</span>
+          <span class="result-name">${file.name}</span>
+        </div>
+        <div class="result-body"><p class="error-msg">${e.message}</p></div>`;
+    }
+  }
+
+  resultsEl.querySelectorAll(".btn-download").forEach(b => {
+    b.addEventListener("click", () => {
+      const { xmlOut, nomeCorrigido } = xmlResults[+b.dataset.idx];
+      downloadBlob(xmlOut, nomeCorrigido);
+    });
+  });
+
+  if (houveSuccesso) {
+    document.getElementById("sum-cp").textContent = totalCp.toFixed(2);
+    document.getElementById("sum-ch").textContent = totalCh;
+    document.getElementById("sum-tr").textContent = totalTr;
+    summaryEl.style.display = "block";
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = "Processar arquivos";
+});
+</script>
+</body>
+</html>
