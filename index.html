@@ -35,7 +35,9 @@
       position: relative; background: var(--surface);
     }
     .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: var(--accent-dim); }
-    .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .upload-zone input[type=file] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
     .upload-icon { font-size: 40px; margin-bottom: 12px; }
     .upload-zone h2 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
     .upload-zone p { color: var(--muted); font-size: 14px; }
@@ -48,7 +50,7 @@
     .file-pill {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 10px 16px;
-      display: flex; align-items: center; gap: 10px; font-size: 14px;
+      display: flex; align-items: center; gap: 10px;
     }
     .file-pill .fname { flex: 1; font-family: var(--mono); font-size: 13px; }
     .file-pill .fsize { color: var(--muted); font-size: 12px; }
@@ -148,15 +150,29 @@
 
 <script>
 // ─── KML Logic ────────────────────────────────────────────────────────────────
+const NS = "http://www.opengis.net/kml/2.2";
 const STYLE_MAP = { CH: "CHAVE", CP: "CABO", TR: "TRAFO" };
 const RENAME_FROM_DESC = new Set(["CH", "TR"]);
 const ORDEM_PASTAS = ["CHAVE", "CABO", "TRAFO"];
 
+// Helper: busca filho por localName (ignora namespace)
+function child(elem, localName) {
+  for (const c of elem.childNodes) {
+    if (c.nodeType === 1 && c.localName === localName) return c;
+  }
+  return null;
+}
+
+// Helper: busca descendente por localName
+function find(elem, localName) {
+  const all = elem.getElementsByTagNameNS("*", localName);
+  return all.length ? all[0] : null;
+}
+
 function haversine(lon1, lat1, lon2, lat2) {
-  const R = 6371000;
-  const r = d => d * Math.PI / 180;
+  const R = 6371000, r = d => d * Math.PI / 180;
   const phi1 = r(lat1), phi2 = r(lat2);
-  const dphi = r(lat2-lat1), dlam = r(lon2-lon1);
+  const dphi = r(lat2 - lat1), dlam = r(lon2 - lon1);
   const a = Math.sin(dphi/2)**2 + Math.cos(phi1)*Math.cos(phi2)*Math.sin(dlam/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
@@ -166,27 +182,34 @@ function processarKML(xmlString) {
   const doc = parser.parseFromString(xmlString, "application/xml");
   if (doc.querySelector("parsererror")) throw new Error("XML inválido.");
 
-  const docElem = doc.querySelector("Document");
+  const docElem = doc.getElementsByTagNameNS("*", "Document")[0];
   if (!docElem) throw new Error("Arquivo sem elemento <Document>.");
 
-  // Separa styles
-  const styles = [...docElem.children].filter(c => c.tagName === "Style" || c.tagName === "StyleMap");
+  // Coleta styles (filhos diretos do Document)
+  const styles = [];
+  for (const c of [...docElem.childNodes]) {
+    if (c.nodeType === 1 && (c.localName === "Style" || c.localName === "StyleMap")) {
+      styles.push(c);
+    }
+  }
 
-  // Classifica placemarks
+  // Classifica todos os Placemarks
   const bucket = {};
-  doc.querySelectorAll("Placemark").forEach(pm => {
-    const su = pm.querySelector("styleUrl");
-    if (!su) return;
-    const styleId = su.textContent.trim().replace("#", "").toUpperCase();
+  const allPM = [...doc.getElementsByTagNameNS("*", "Placemark")];
+
+  allPM.forEach(pm => {
+    const suEl = find(pm, "styleUrl");
+    if (!suEl) return;
+    const styleId = suEl.textContent.trim().replace("#", "").toUpperCase();
     const destino = STYLE_MAP[styleId];
     if (!destino) return;
 
     // Corrige name para CH e TR
     if (RENAME_FROM_DESC.has(styleId)) {
-      const desc = pm.querySelector("description");
-      if (desc) {
-        const primeiroCampo = desc.textContent.split("/")[0].trim();
-        const nameEl = pm.querySelector("name");
+      const descEl = find(pm, "description");
+      if (descEl) {
+        const primeiroCampo = descEl.textContent.split("/")[0].trim();
+        const nameEl = find(pm, "name");
         if (nameEl && primeiroCampo) nameEl.textContent = primeiroCampo;
       }
     }
@@ -195,17 +218,19 @@ function processarKML(xmlString) {
     bucket[destino].push(pm);
   });
 
-  // Remove folders antigas do Document
-  [...docElem.children].forEach(c => {
-    if (c.tagName === "Folder" || c.tagName === "Placemark") c.remove();
+  // Remove tudo do Document exceto styles
+  [...docElem.childNodes].forEach(c => {
+    if (c.nodeType === 1 && c.localName !== "Style" && c.localName !== "StyleMap") {
+      docElem.removeChild(c);
+    }
   });
 
-  // Recria com novas pastas
+  // Recria pastas
   ORDEM_PASTAS.forEach(pasta => {
     const items = bucket[pasta] || [];
     if (!items.length) return;
-    const folder = doc.createElement("Folder");
-    const nameEl = doc.createElement("name");
+    const folder = doc.createElementNS(NS, "Folder");
+    const nameEl = doc.createElementNS(NS, "name");
     nameEl.textContent = pasta;
     folder.appendChild(nameEl);
     items.forEach(pm => folder.appendChild(pm));
@@ -215,9 +240,9 @@ function processarKML(xmlString) {
   // Calcula métricas
   let extCp = 0;
   (bucket["CABO"] || []).forEach(pm => {
-    const coords = pm.querySelector("coordinates");
-    if (!coords) return;
-    const pts = coords.textContent.trim().split(/\s+/).map(p => p.split(",").map(Number));
+    const coordsEl = find(pm, "coordinates");
+    if (!coordsEl) return;
+    const pts = coordsEl.textContent.trim().split(/\s+/).map(p => p.split(",").map(Number));
     for (let i = 0; i < pts.length - 1; i++)
       extCp += haversine(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]);
   });
@@ -225,30 +250,31 @@ function processarKML(xmlString) {
   const cntCh = (bucket["CHAVE"] || []).length;
   const cntTr = (bucket["TRAFO"] || []).length;
 
-  const xmlOut = '<?xml version="1.0" encoding="UTF-8"?>\n' +
-    new XMLSerializer().serializeToString(doc.documentElement);
+  const xmlOut = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + new XMLSerializer().serializeToString(doc.documentElement);
 
   return { xmlOut, extCpKm: extCp / 1000, cntCh, cntTr };
 }
 
 // ─── UI ──────────────────────────────────────────────────────────────────────
-const dropZone  = document.getElementById("drop-zone");
-const fileInput = document.getElementById("file-input");
+const dropZone   = document.getElementById("drop-zone");
+const fileInput  = document.getElementById("file-input");
 const fileListEl = document.getElementById("file-list");
-const btn       = document.getElementById("btn-processar");
-const resultsEl = document.getElementById("results");
-const summaryEl = document.getElementById("summary");
+const btn        = document.getElementById("btn-processar");
+const resultsEl  = document.getElementById("results");
+const summaryEl  = document.getElementById("summary");
 
 let selectedFiles = [];
+const xmlResults  = [];
 
-const formatSize = b => b < 1024 ? b+" B" : b < 1048576 ? (b/1024).toFixed(1)+" KB" : (b/1048576).toFixed(1)+" MB";
+const fmtSize = b => b < 1024 ? b+" B" : b < 1048576 ? (b/1024).toFixed(1)+" KB" : (b/1048576).toFixed(1)+" MB";
 
 function renderFileList() {
   fileListEl.innerHTML = "";
   selectedFiles.forEach((f, i) => {
     const pill = document.createElement("div");
     pill.className = "file-pill";
-    pill.innerHTML = `<span>📄</span><span class="fname">${f.name}</span><span class="fsize">${formatSize(f.size)}</span><button class="remove" data-i="${i}">×</button>`;
+    pill.innerHTML = `<span>📄</span><span class="fname">${f.name}</span><span class="fsize">${fmtSize(f.size)}</span><button class="remove" data-i="${i}">×</button>`;
     fileListEl.appendChild(pill);
   });
   btn.style.display = selectedFiles.length ? "block" : "none";
@@ -268,14 +294,16 @@ function addFiles(files) {
 }
 
 fileInput.addEventListener("change", e => addFiles(e.target.files));
-dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drag"); });
+dropZone.addEventListener("dragover",  e => { e.preventDefault(); dropZone.classList.add("drag"); });
 dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag"));
-dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("drag"); addFiles(e.dataTransfer.files); });
+dropZone.addEventListener("drop", e => {
+  e.preventDefault(); dropZone.classList.remove("drag"); addFiles(e.dataTransfer.files);
+});
 
 function downloadBlob(content, filename) {
   const blob = new Blob([content], { type: "application/vnd.google-earth.kml+xml" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
   a.href = url; a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -286,9 +314,9 @@ btn.addEventListener("click", async () => {
   btn.innerHTML = '<span class="spinner"></span>Processando...';
   resultsEl.innerHTML = "";
   summaryEl.style.display = "none";
+  xmlResults.length = 0;
 
   let totalCp = 0, totalCh = 0, totalTr = 0, houveSuccesso = false;
-  const xmlResults = [];
 
   for (const file of selectedFiles) {
     const card = document.createElement("div");
@@ -302,10 +330,9 @@ btn.addEventListener("click", async () => {
 
       totalCp += extCpKm; totalCh += cntCh; totalTr += cntTr;
       houveSuccesso = true;
-      xmlResults.push({ xmlOut, nomeCorrigido });
+      const idx = xmlResults.push({ xmlOut, nomeCorrigido }) - 1;
 
       card.className = "result-card success";
-      const idx = xmlResults.length - 1;
       card.innerHTML = `
         <div class="result-header">
           <span class="result-icon">✅</span>
@@ -319,6 +346,7 @@ btn.addEventListener("click", async () => {
           </div>
           <button class="btn-download" data-idx="${idx}">⬇️ Baixar arquivo corrigido</button>
         </div>`;
+
     } catch(e) {
       card.className = "result-card error";
       card.innerHTML = `
